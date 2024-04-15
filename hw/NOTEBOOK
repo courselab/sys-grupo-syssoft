@@ -5,4 +5,8 @@
 1)
     d) The files are identical, this were the expected to happen given we are converting from assembly code, given this the instructions if not identical should be very close.
 
-    e)  
+    e) The files differs as expected, since one is a assembly code and the other is a binary dissambled, so their structure would certainly vary, but looking only for the instructions we only got one new line with an add instruction.
+
+    f) The boot didn't booted in the QEMU emulator. "Boot failed: not a bootable disk"
+
+    i) The instructions of both files still very similar, they mainly differ in the memory positions.
