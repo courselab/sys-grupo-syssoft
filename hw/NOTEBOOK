@@ -1,3 +1,8 @@
 #    SPDX-FileCopyrightText: 2024 Diopedro <diogenes.pedro06@gmail.com>
 #   
 #    SPDX-License-Identifier: GPL-3.0-or-later
+
+1)
+    d) The files are identical, this were the expected to happen given we are converting from assembly code, given this the instructions if not identical should be very close.
+
+    e)  
