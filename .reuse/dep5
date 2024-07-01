@@ -1,5 +1,9 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-Upstream-Name: sys-grupo-syssoft
+Upstream-Name: .
 Upstream-Contact: Diopedro <diogenes.pedro06@gmail.com>
 Source: https://github.com/courselab/sys-grupo-syssoft.git
+
+Files: */.dist
+Copyright: Diopedro <diogenes.pedro06@gmail.com>
+License: CC0-1.0
 
