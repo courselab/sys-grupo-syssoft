@@ -1,4 +1,138 @@
 #    SPDX-FileCopyrightText: 2024 Diopedro <diogenes.pedro06@gmail.com>
-#    SPDX-FileCopyrightText: 2024 yasmin-araujo <yasminaraujo2206@gmail.com>
+#    SPDX-FileCopyrightText: 2024 Yasmin-araujo <yasminaraujo2206@gmail.com>
 #   
 #    SPDX-License-Identifier: GPL-3.0-or-later
+
+# Report on how to bypass the decodification without an token to decript any of the data
+
+## First Step: Decompiling the code
+
+First we gotta decompile the decode file, there's many ways to do it with programs such as Ghidra. By using it we can have a look at a possible C code, after the binary being reversed engineered.
+
+## Second step: Analyzing the possible breach
+
+When looking at the C code (a complete look of the code can be see in the files in the repository) we can see in line 41 the following code:
+
+```c
+if (*(int *)(token + local_220 * 4) == 0)
+  {
+    puts("Denied.");
+    uVar4 = 1;
+  }
+```
+
+Now that we alredy know which part of the code we need to find when looking at the asembly code (the complete file can be found in the repository), when looking at it we can see that the memory address 0x8049395:
+
+```assembly
+8049388:	8b 85 e8 fd ff ff    	mov    -0x218(%ebp),%eax
+ 804938e:	8b 04 85 18 c0 04 08 	mov    0x804c018(,%eax,4),%eax
+ 8049395:	85 c0                	test   %eax,%eax <- This is the part we want to break into execution
+ 8049397:	75 1a                	jne    80493b3 <main+0x126>
+ 8049399:	83 ec 0c             	sub    $0xc,%esp
+```
+
+The if statement that is being checked here is what decides if we have and valid or invalid token, so for this we gotta change the eax register value.
+
+## Third step: Using GDB to bypass the token authentication
+
+Using gdb (GNU Debugger) we can control the execution of the program by using breakpoints.
+
+Let's start by opening the gdb:
+```bash
+gdb
+```
+
+Then we gotta select which file we are using:
+
+```gdb
+file decode
+```
+
+After selecting our file, let's add the breakpoint to it:
+
+```gdb
+b *0x8049395
+```
+
+Now that we have alredy selected our file and created a breakpoint, let's add the required library, for this we gotta export a path. Let's export this path only for the environment of the GDB:
+
+```gdb
+set environment LD_LIBRARY_PATH /home/dio/sys-grupo-syssoft/imf
+```
+
+After having configured all that is necessary let's run the decode program with the secret.cry file as argument:
+
+```gdb
+run secret.cry
+```
+
+When doing this command the program will be stopped at first for the user to provide an access token, how we are bypassing it you can type whatever you want, such as, 1234.
+
+Then our program will be stopped at the breakpoint, here let's check how is the memory for our registers by doing:
+
+```gdb
+info registers
+```
+
+This will give us something like this:
+```gdb
+(gdb) info registers
+eax            0x0                 0
+ecx            0x98                152
+edx            0xf7fbb00a          -134500342
+```
+
+Then we gotta update the value of the eax register to 1, so the if fails, giving us access to the decoded content, we can do this by using the following command:
+
+```gdb
+set $eax=0x1
+```
+
+After this let's check the values of the registers with the same command as before ```ìnfo registers```:
+
+```gdb
+(gdb) info registers
+eax            0x1                 1
+ecx            0x98                152
+edx            0xf7fbb00a          -134500342
+```
+
+Then we just need to continue the execution of our program by using the command ```continue```.
+
+After all those steps we finally have the content we were looking for which is: https://drive.google.com/file/d/1n0w8dFS8zJ7flnAQI75uLkw40IzAVUdW
+
+## Fourth step: Automatize with a gdb script
+
+For making it easier for the agents I've created an gdb script wich will automatize this whole process, the script is as follows:
+
+```gdb
+file decode
+b *0x8049395
+set environment LD_LIBRARY_PATH /home/dio/sys-grupo-syssoft/imf
+run secret.cry
+set $eax=0x1
+continue
+```
+
+For the script to work all three files (decode, secret.cry and library.so) needs to be in the same directory. And to run it we just need to run the command
+
+```bash
+gdb -x bypass.gdb
+```
+
+When asked with an access token the agent can write anything, as previously mentioned.
+
+## Step five: Final solution using Makefile
+
+We just gotta add into our makefile an rule to run our gdb script, like this:
+
+```Makefile
+bypass:
+    gdb -x bypass.gdb
+```
+
+Then into our terminal we just gotta call this rule:
+
+```bash
+make bypass
+```
