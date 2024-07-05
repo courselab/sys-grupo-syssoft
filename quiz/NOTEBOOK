@@ -1,0 +1,299 @@
+#    SPDX-FileCopyrightText: 2024 Diopedro <diogenes.pedro06@gmail.com>
+#    SPDX-FileCopyrightText: 2024 Yasmin-araujo <yasminaraujo2206@gmail.com>
+#   
+#    SPDX-License-Identifier: GPL-3.0-or-later
+
+# Quiz question explanations
+
+## P1: Explain the results
+
+By running the makefile we can understand the executable file is only updated when necessary, then we can run our binary file sometimes using this bash loop code:
+
+```bash
+for i in {1..5}
+do
+./p1
+done
+```
+
+When running this code we will have something like this, as output:
+
+```
+Main's ddress: 0x5663d19d
+Main's ddress: 0x5658219d
+Main's ddress: 0x565a519d
+Main's ddress: 0x565e719d
+Main's ddress: 0x565e219d
+```
+
+Here we can see our main is being placed in random locations in the memory every time, this happens because of the ASLR (Address Space Layout Randomization), this security technique is used to prevent exploitations like buffer overflow.
+
+## P2: Fix design vulnerability
+
+When the user inputs youshallnotpass the program have a string of 15 characters, when looking our code we can see at the definition of the user_key the following:
+
+```c
+int main (void){
+  int verified = 0;
+  char user_key[10];
+...
+```
+We can see that user_key if a static vector of chars with size 10, that means a string such as youshallnotpass with size 15 won't be fully stored into the user_key, so what's happening is the verified memory space is being overflowed with the rest of the sting.
+
+This way even with the comparison of the code in line 30:
+
+```c
+if (!strcmp (user_key, "foo"))
+    verified = 1;
+```
+
+The verified variable is having it's value changed because of the rest of the user_key string, changing it's value to something >= 1 grating the access.
+
+The vulnerability is because of the scanf function by not specifing a maximum length of characters to read.
+
+After running our code again with the flag to protect the stack we will have a stack canary to warn us of possible overflows.
+
+But when running the program again even thought the access isn't granted to the user the canary doesn't detect the overflow because the canary space wasn't invaded.
+
+A way to fix the vulnerability is by adding some modifications, this is the code after the adition of the modifications:
+
+```c
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+
+// Reads and input until '\n' with any amount of characters in it
+char* readLine(FILE* input){
+    char *str;
+
+    str = (char*) malloc (32 * sizeof(char)); //Doing inicial allocation
+
+    int pos = 0, tamanho = 32;
+    
+    do {
+        // Reallocating the heap memory in case the word exceds the limit
+        if (pos == tamanho) {
+            str = realloc (str, 2 * tamanho);
+            tamanho *= 2;
+        }
+
+        // Getting the chars
+        str[pos] = (char) fgetc(input);
+        if (str[pos] == '\r') pos--;
+        pos++;
+
+    } while (str[pos-1] != '\n' && !feof(input));
+
+    str[pos-1] = '\0'; 
+    str = realloc(str, pos);
+    
+    return str;
+}
+
+// Verify if both of the words are equal to grant access
+int verify_password (const char *input){
+    const char *key = "foo";
+    if (!strcmp(input, key))
+        return 1;
+
+    return 0; 
+}
+
+int main (void){
+    /* Read user's credentials. */
+    printf("Enter password: ");
+    char *user_key = readLine(stdin);
+
+    /* Verify credentials. */
+    if (!verify_password(user_key)){
+        printf ("Access denied\n");
+        exit (1);
+    }
+    printf ("Access granted.\n");
+
+    /* Priviledged code follows... */
+
+    return 0;
+}
+```
+
+## P3: Explain the function calls
+
+### a) How 'foo' calls 'bar'
+
+```assembly
+80491a5:	8b 45 08             mov    0x8(%ebp),%eax     # %eax receives parameter n
+80491a8:	83 c0 01             add    $0x1,%eax          # n+1 into %eax
+80491ab:	83 ec 0c             sub    $0xc,%esp          # Allocates 12 bytes on the stack
+80491ae:	50                   push   %eax               # n+1 as parameter for bar pushed to stack
+80491af:	e8 0b 00 00 00       call   80491bf <bar>      # calls bar with the parameter in the stack
+```
+
+The way a function is called in x86 architectures (32 bits), defines that the parameters must be pushed into the stack this is part of the calling convention. GCC uses a convention called CDECL that says the parameters must be pushed to the stack in an order from the right to left, it's also part of this convention to define that the caller function must clean and manipulate the stack after the call.
+
+For the calling convention work and for different levels of a program be able to comunicate in binary it's necessary to exist the ABI (Application Binary Interface), this is what makes such conventions.
+
+### b) How 'bar' return the result to 'bar'
+
+```assembly
+<bar>: This part of the assembly is below foo
+... 
+80491ce:	8b 45 fc             	mov    -0x4(%ebp),%eax
+80491d1:	c9                   	leave  
+80491d2:	c3                   	ret    
+
+<foo>:
+...
+80491af:	e8 0b 00 00 00        call   80491bf <bar>     # bar return the value through %eax (80491ce)
+80491b4:	83 c4 10              add    $0x10,%esp        
+80491b7:	89 45 f4              mov    %eax,-0xc(%ebp)   # the value is moved from %eax to -0xc(%ebp)
+80491ba:	8b 45 f4              mov    -0xc(%ebp),%eax   # foo retrives the value
+```
+The awnser is realed to the ABI because the calling convention says that the eax registers is the one used for storing the return value from a function.
+
+### c) Purpose of the two first and two last instructions in 'foo'
+
+The first two lines:
+
+```assembly
+804919f:	55                   	push   %ebp       # Save the current base pointer location
+80491a0:	89 e5                	mov    %esp,%ebp  # Sets up a new base pointer for the function
+```
+
+The last two lines:
+
+```assembly
+80491bd:	c9                   	leave             # Restore the base pointer and the stack
+80491be:	c3                   	ret               # Return from foo function
+```
+
+Those lines are important because they are the ones that configures the control of the stack frame of the function. They are necessary to maintain the context of the caller function and prepare the stack for the current function execution. They are also a part of the calling convention from item (a).
+
+### d) Purpose of the third line if 'foo' and 'bar'
+
+```assembly
+<foo>:
+80491a2:	83 ec 18             	sub    $0x18,%esp # Change the stack pointer place in memory
+
+<bar>:
+80491c2:	83 ec 10             	sub    $0x10,%esp # Change the stack pointer place in memory
+```
+
+These lines configures the stack frame to alocate the necessary space for the functions variables so they adjust where the stack point (%esp) should be located. This is related to ABI x86 because it follows the defition of stack management and variable storage to maintain the function independent and secure.
+
+```assembly
+8049190:	83 e4 f0             	and    $0xfffffff0,%esp # Adjust the stack pointer
+```
+
+This opeartions aligns the stack with a 16 bytes multiple, this practice is common for optimizing the memory.
+
+### e) Change the return type of function 'bar' from int to char
+
+This is the assembly of the function before the changes:
+
+```assembly
+80491af:	e8 0b 00 00 00       	call   80491bf <bar>
+80491b4:	83 c4 10             	add    $0x10,%esp
+80491b7:	89 45 f4             	mov    %eax,-0xc(%ebp)
+80491ba:	8b 45 f4             	mov    -0xc(%ebp),%eax
+```
+
+This is the assembly of the function after the changes:
+
+```assembly
+80491af:	e8 0e 00 00 00       	call   80491c2 <bar>
+80491b4:	83 c4 10             	add    $0x10,%esp
+80491b7:	0f be c0             	movsbl %al,%eax         <- This is the new instruction added
+80491ba:	89 45 f4             	mov    %eax,-0xc(%ebp)
+80491bd:	8b 45 f4             	mov    -0xc(%ebp),%eax
+```
+
+1. **What the compiler did:**
+
+   After calling `bar` in `foo`, the value returned by `bar` (a byte) is moved to a position on the stack (`-0xc(%ebp)`). Initially, the value was simply moved to the stack without any additional instructions. However, after the modification, the compiler added the instruction `movsbl %al,%eax`. This `movsbl` instruction performs a sign-extension of the byte from `al` to `eax`, filling `eax` with zeros or ones depending on the sign of the original byte in `al`. This ensures that the value is correctly handled as a signed integer when moved to a larger register.
+
+2. **What is the importance of declaring functions before the main:**
+
+   Declaring the functions `foo` and `bar` before `main` allows the compiler to know their signatures, including their return types and parameters, when compiling `main`. This is crucial for the compiler to correctly generate function calls, as evidenced by the sign-extension added after calling `bar` in `foo`. Furthermore, early declarations facilitate the generation of optimized code and the resolution of dependencies between functions during the compilation process. By providing this information upfront, the compiler can produce more efficient and accurate code.
+
+## P4: How libraries work
+
+### a) Execute each program and comment the results
+
+After running each program we see that versions 1 and 2 run normally, but when running version 3 we gotta the result:
+
+```bash
+./p4-v3
+./p4-v3: error while loading shared libraries: libp4.so: cannot open shared object file: No such file or directory
+```
+
+This result is because we are using a shared library so we need to define our LD_LIBRARY_PATH so our program can use the library that is present at the directory, we can define the path like this:
+
+```bash
+export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/home/dio/sys-grupo-syssoft/quiz"
+```
+
+After defining the library path we can run the program again to check if the output have changed
+
+```bash
+./p4-v3
+Foo
+```
+
+### b) Compare the size of all programs and explain differences
+
+By using the command ```stat <file>``` we can see the size of each file
+
+- `p4-v1`: 15020 bytes
+- `p4-v2`: 14980 bytes
+- `p4-v3`: 14924 bytes
+
+As we can see there's a little difference between the files.
+
+`p4-v1` is the biggest file because there's necessity to include the code from each one of the files, p4.o, p4a.o and p4b.o.
+
+`p4-v2` is smaller than `p4-v1` because it uses a static library `libp4.a` but how the library is static, is not that small.
+
+`p4-v3` is the smaller of them all because it uses an dynamic library.
+
+### c) Inspect the programs with nm and discuss the differences
+
+- `p4-v1` contains 'foo' and 'bar' as shown by letter 'T', this means they are directly linked into the executable
+
+- `p4-v2` 'foo' is contained as shown by letter 'T' but 'bar' isn't listed, this happens because we are using the static library `libp4.a` and `p4-v2` is only using 'foo' function.
+
+- `p4-v3` 'foo' is not listed directly shown by symbol 'U' and 'bar' is not listed, this happens because how we are using a dynamic library `libp4.so` they're resolved during the runtime.
+
+### d) Discuss the differences between the library informations
+
+When running the command for `p4-v1` and `p4-v2` we see the only needed library is `libc.so.6`.
+
+Maybe at `p4-v2` it were expected to see the `libp4.a` library at the '(NEEDED) Shared Library' but how the library is static there's no necessity to be shown at the dynamic section.
+
+When we look at the output for `p4-v3` we see that there's an explit dependecy for the shared library `libp4.so` which is also shown at the '(NEEDED) Shared Library'.
+
+### e) Discuss the pros and cons of static and dynamic libraries
+
+a) The executable program should be installed on other hosts
+
+**Pros:**
+Static libraries make distribution easier by bundling all dependencies within the executable, eliminating the need to install additional libraries on the target system. Dynamic libraries result in smaller executables, conserving storage and space on the target system.
+
+**Cons:**
+Static libraries lead to larger executables since each contains its own copy of the library, which is inefficient when multiple programs use the same library. Dynamic libraries require the target system to have compatible versions of the shared libraries installed, leading to potential dependency issues.
+
+### b) The library is updated
+
+**Pros:**
+Static libraries offer controlled updates, as each application uses its own version of the library, ensuring stability. Dynamic libraries allow all applications to benefit from updates simultaneously, ensuring consistency and reducing redundancy.
+
+**Cons:**
+Updating static libraries is time-consuming, requiring each application to be rebuilt and redistributed. Dynamic libraries can introduce compatibility issues if applications rely on specific library versions, making dependency management complex.
+
+### c) The library should be used by many different programs running on the same host
+
+**Pros:**
+Static libraries provide isolation, as each application has its own copy of the library, reducing conflicts. Dynamic libraries are efficient, allowing multiple programs to share a single instance, saving memory and disk space.
+
+**Cons:**
+Static libraries lead to redundant copies of the same library, increasing disk space and memory usage. Dynamic libraries can cause compatibility issues if different applications need different versions, complicating dependency management and potentially impacting multiple applications simultaneously.
